@@ -110,7 +110,7 @@ def check_text(path: str, text: str, *, is_python: bool) -> list[Finding]:
             continue
 
         if not is_python:
-            secret = _generic_secret(line, is_config=is_config, is_code=is_code, is_dockerfile=is_dockerfile)
+            secret = generic_secret(line, is_config=is_config, is_code=is_code, is_dockerfile=is_dockerfile)
             if secret:
                 findings.append(_finding("AIG002", path, i, line, secret[1], secret[0]))
 
@@ -131,7 +131,7 @@ def check_text(path: str, text: str, *, is_python: bool) -> list[Finding]:
     return findings
 
 
-def _generic_secret(line: str, *, is_config: bool, is_code: bool, is_dockerfile: bool) -> tuple[str, str] | None:
+def generic_secret(line: str, *, is_config: bool, is_code: bool, is_dockerfile: bool) -> tuple[str, str] | None:
     stripped = line.strip()
     if stripped.startswith(("#", "//", ";")):
         return None

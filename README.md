@@ -6,7 +6,7 @@
 
 <p><i>Security scanner for AI-generated code: finds what vibe coding leaves behind and explains how to fix it.</i></p>
 
-<a href="https://github.com/jasperBLCK/AigisSAST/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/jasperBLCK/AigisSAST/ci.yml?branch=main&style=for-the-badge&label=CI&labelColor=000000&color=333333&logo=githubactions&logoColor=white"/></a> <img src="https://img.shields.io/badge/python-3.9+-000000?style=for-the-badge&logo=python&logoColor=white"/> <img src="https://img.shields.io/badge/dependencies-0-000000?style=for-the-badge"/> <img src="https://img.shields.io/badge/SARIF-2.1.0-000000?style=for-the-badge&logo=github&logoColor=white"/> <img src="https://img.shields.io/badge/license-MIT-000000?style=for-the-badge"/>
+<a href="https://github.com/jasperBLCK/AigisSAST/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/jasperBLCK/AigisSAST/ci.yml?branch=main&style=for-the-badge&label=CI&labelColor=000000&color=333333&logo=githubactions&logoColor=white"/></a> <img src="https://img.shields.io/badge/python-3.9+-000000?style=for-the-badge&logo=python&logoColor=white"/> <img src="https://img.shields.io/badge/dependencies-0-000000?style=for-the-badge"/> <img src="https://img.shields.io/badge/SARIF-2.1.0-000000?style=for-the-badge&logo=github&logoColor=white"/> <img src="https://img.shields.io/badge/aigis-A%20100%2F100-000000?style=for-the-badge"/> <img src="https://img.shields.io/badge/license-MIT-000000?style=for-the-badge"/>
 
 </div>
 
@@ -28,13 +28,18 @@ AigisSAST ловит именно эти ошибки и объясняет ка
 - **Ноль зависимостей.** Только стандартная библиотека Python, ставится за секунду.
 - **AST, а не grep.** Python-код разбирается синтаксическим деревом, поэтому меньше ложных срабатываний.
 - **Секреты маскируются** в отчёте: `sk-p************`, сам ключ в логах CI не светится.
+- **Не только ругается, но и чинит.** `aigis fix` сам выносит ключи в `.env` и правит безопасные случаи.
+- **Видит прошлое.** `aigis history` находит ключи, которые «удалили», но они остались в истории git.
 - **CI-ready.** Exit-коды, SARIF для GitHub Code Scanning, JSON, Markdown, GitHub Action и pre-commit hook.
 
 ## Быстрый старт
 
 ```bash
 pip install git+https://github.com/jasperBLCK/AigisSAST
-aigis scan .
+aigis scan .            # найти проблемы
+aigis fix --dry-run     # посмотреть, что исправится автоматически
+aigis fix               # исправить
+aigis history           # проверить всю историю git на утёкшие ключи
 ```
 
 Попробуй на заведомо дырявом примере:
@@ -102,6 +107,51 @@ DEBUG = True  # aigis: ignore[AIG014]
 Файлы и папки исключаются через `.aigisignore` (glob-шаблоны) или флаг `--exclude`.
 `node_modules`, `.venv`, `dist` и lock-файлы пропускаются автоматически, а в git-репозитории ещё и всё из `.gitignore`.
 
+## Автоисправление: `aigis fix`
+
+```bash
+aigis fix --dry-run   # только показать diff
+aigis fix             # применить
+```
+
+Исправляет только то, что можно поменять без риска сломать логику:
+
+| Было | Стало |
+|---|---|
+| `BOT_TOKEN = "7312845567:AA..."` | `BOT_TOKEN = os.environ["BOT_TOKEN"]` + значение в `.env`, ключ в `.env.example` |
+| `connect(password="Pa55word!")` | `connect(password=os.environ["PASSWORD"])` |
+| `.env` не в `.gitignore` | `.env` добавлен в `.gitignore` |
+| `requests.get(url, verify=False)` | `verify=True` |
+| `yaml.load(data)` | `yaml.safe_load(data)` |
+| `otp = random.randint(100000, 999999)` | `otp = secrets.randbelow(900000) + 100000` |
+| `token = random.choice(alphabet)` | `secrets.choice(alphabet)` |
+| `app.run(debug=True)` / `DEBUG = True` | `debug=False` / `DEBUG = os.getenv("DEBUG") == "1"` |
+| `- "5432:5432"` в compose | `- "127.0.0.1:5432:5432"` |
+
+Нужные `import os` / `import secrets` добавляются сами. SQL-инъекции, `eval`, `pickle`, JWT и CORS
+автоматически не трогаются: там нужно понимать логику приложения, поэтому они остаются в списке «вручную».
+
+## Утёкшие ключи в истории: `aigis history`
+
+```text
+$ aigis history
+aigis history: секретов в истории git: 1
+
+  [CRITICAL] AIG001  7312************  (Telegram bot token)
+      bot.py  ·  коммит 402c92b от 2026-09-14  ·  удалён, но остался в истории
+```
+
+Удалить ключ новым коммитом мало: старая версия файла остаётся в истории, и её видит любой, кто склонировал репо.
+`aigis history` проходит по всем коммитам и веткам, показывает, где и когда ключ появился и есть ли он в коде сейчас.
+Ключи в отчёте замаскированы. Для CI: `aigis history -f json`, exit code `1`, если что-то найдено.
+
+## Бейдж для README
+
+```bash
+aigis badge                # пишет aigis-badge.svg с оценкой, например «aigis | A 100/100»
+aigis badge --url          # ссылка shields.io, без файла
+```
+
 ## AI-режим
 
 ```bash
@@ -129,7 +179,7 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@v4
-      - uses: jasperBLCK/AigisSAST@v0.1.0
+      - uses: jasperBLCK/AigisSAST@v0.2.0
         with:
           fail-on: high
 ```
@@ -141,7 +191,7 @@ jobs:
 ```yaml
 repos:
   - repo: https://github.com/jasperBLCK/AigisSAST
-    rev: v0.1.0
+    rev: v0.2.0
     hooks:
       - id: aigis
 ```
@@ -157,6 +207,10 @@ aigis scan
    │    └── text         regex: токены, ключи, DSN, конфиги, Dockerfile, compose, JS/TS
    ├── ai           (опционально) OpenAI-совместимый API, секреты отфильтрованы
    └── report       text · json · sarif · markdown  +  score / grade
+
+aigis fix       AST-позиции находок → точечные правки → .env / .env.example / .gitignore
+aigis history   git log -p --all → добавленные строки → те же детекторы секретов
+aigis badge     score / grade → SVG или shields.io
 ```
 
 Разработка:
@@ -172,7 +226,9 @@ ruff check . && ruff format --check . && pytest -q
 - [x] Python AST-правила, секреты, конфиги, Dockerfile, compose, JS/TS
 - [x] SARIF, JSON, Markdown, GitHub Action, pre-commit
 - [x] AI-исправления через OpenAI-совместимый API
-- [ ] `aigis fix`: автоматическое исправление безопасных случаев (вынос секретов в `.env`)
+- [x] `aigis fix`: автоматическое исправление безопасных случаев (вынос секретов в `.env`)
+- [x] `aigis history`: поиск секретов во всей истории git
+- [x] `aigis badge`: бейдж с оценкой безопасности
 - [ ] Проверка зависимостей на известные CVE и тайпсквоттинг
 - [ ] Правила для Django и Flask, Go и PHP
 - [ ] VS Code extension

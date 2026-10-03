@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
-from aigis import __version__, ai, report
+from aigis import __version__, ai, badge, fix, history, report
 from aigis.models import Severity
 from aigis.rules import RULES
 from aigis.scanner import ScanResult, scan_path
@@ -41,6 +42,20 @@ def _build_parser() -> argparse.ArgumentParser:
     color = s.add_mutually_exclusive_group()
     color.add_argument("--color", dest="color", action="store_true", default=None)
     color.add_argument("--no-color", dest="color", action="store_false")
+
+    fx = sub.add_parser("fix", help="auto-fix safe cases: secrets to .env, verify=False, random, debug, ports")
+    fx.add_argument("path", nargs="?", default=".")
+    fx.add_argument("--dry-run", action="store_true", help="only show the diff, do not change files")
+
+    h = sub.add_parser("history", help="find secrets ever committed to git history")
+    h.add_argument("path", nargs="?", default=".")
+    h.add_argument("-f", "--format", choices=["text", "json"], default="text")
+    h.add_argument("-n", "--max-commits", type=int, help="only check the last N commits")
+
+    b = sub.add_parser("badge", help="security grade badge for your README")
+    b.add_argument("path", nargs="?", default=".")
+    b.add_argument("-o", "--output", default="aigis-badge.svg", help="SVG file (default: aigis-badge.svg)")
+    b.add_argument("--url", action="store_true", help="print a shields.io URL instead of writing an SVG")
 
     sub.add_parser("rules", help="list all rules")
     e = sub.add_parser("explain", help="show a rule in detail")
@@ -81,11 +96,83 @@ def cmd_scan(args: argparse.Namespace) -> int:
 
     color = report.use_color(sys.stdout, args.color) and args.format == "text" and not args.output
     report.write(report.render(result, args.format, color=color, verbose=not args.quiet), args.output)
+    fixable = sum(1 for f in result.findings if fix.is_fixable(f))
+    if fixable and args.format == "text" and not args.output:
+        print(f"  {fixable} можно исправить автоматически: aigis fix --dry-run\n", file=sys.stderr)
 
     if args.fail_on == "none":
         return 0
     threshold = Severity.parse(args.fail_on)
     return 1 if any(f.effective_severity >= threshold for f in result.findings) else 0
+
+
+def cmd_fix(args: argparse.Namespace) -> int:
+    target = Path(args.path)
+    if not target.exists():
+        print(f"aigis: путь не найден: {args.path}", file=sys.stderr)
+        return 2
+    plan = fix.plan(target)
+    for f in plan.files:
+        print(f.diff())
+    if plan.env:
+        print(f"+ .env: {', '.join(plan.env)} (значения перенесены из кода)")
+    if plan.gitignore_env:
+        print("+ .gitignore: .env")
+    if not args.dry_run:
+        fix.apply(plan)
+
+    verb = "будет исправлено" if args.dry_run else "исправлено"
+    print(f"\naigis fix: {verb} {plan.fixed}, вручную осталось {len(plan.manual)}")
+    if plan.env:
+        print("  Ключи из кода теперь читаются из окружения. Подгрузи .env (python-dotenv, docker --env-file)")
+        print("  и перевыпусти эти ключи: они уже были в коде. Старые коммиты проверит `aigis history`.")
+    if plan.gitignore_env and (plan.root / ".git").exists():
+        print("  Если .env уже закоммичен, убери его из индекса: git rm --cached .env")
+    for m in plan.manual:
+        print(f"  {m.rule.id}  {m.path}:{m.line}  {m.rule.title}")
+    if args.dry_run and plan.fixed:
+        print("\nПрименить: aigis fix")
+    return 0
+
+
+def cmd_history(args: argparse.Namespace) -> int:
+    try:
+        leaks = history.scan_history(Path(args.path), max_commits=args.max_commits)
+    except history.NotARepo as exc:
+        print(f"aigis: {exc}", file=sys.stderr)
+        return 2
+    if args.format == "json":
+        print(json.dumps([lk.as_dict() for lk in leaks], ensure_ascii=False, indent=2))
+        return 1 if leaks else 0
+    if not leaks:
+        print("aigis history: секретов в истории git не найдено")
+        return 0
+    print(f"aigis history: секретов в истории git: {len(leaks)}\n")
+    for lk in leaks:
+        state = "ещё в коде" if lk.live else "удалён, но остался в истории"
+        print(f"  [{lk.severity.name}] {lk.rule_id}  {lk.masked}  ({lk.detail})")
+        print(f"      {lk.path}  ·  коммит {lk.commit} от {lk.date}  ·  {state}")
+    print(
+        "\nУдалить коммит мало: любой, кто склонировал репо, видит старые версии файлов.\n"
+        "1. Отзови и перевыпусти каждый ключ.\n"
+        "2. Если нужно, вычисти историю: git filter-repo --replace-text или BFG, затем force push."
+    )
+    return 1
+
+
+def cmd_badge(args: argparse.Namespace) -> int:
+    target = Path(args.path)
+    if not target.exists():
+        print(f"aigis: путь не найден: {args.path}", file=sys.stderr)
+        return 2
+    result = scan_path(target)
+    if args.url:
+        print(badge.badge_url(result))
+        return 0
+    Path(args.output).write_text(badge.badge_svg(result), "utf-8")
+    print(f"{args.output}: {badge.badge_message(result)}")
+    print(f"README: ![aigis]({args.output})")
+    return 0
 
 
 def cmd_rules() -> int:
@@ -116,5 +203,11 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_explain(args.rule_id)
     if args.command == "scan":
         return cmd_scan(args)
+    if args.command == "fix":
+        return cmd_fix(args)
+    if args.command == "history":
+        return cmd_history(args)
+    if args.command == "badge":
+        return cmd_badge(args)
     parser.print_help()
     return 0
