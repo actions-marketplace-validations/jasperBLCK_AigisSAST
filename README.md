@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/header.svg" width="100%" alt="AigisSAST"/>
+<img src="https://raw.githubusercontent.com/jasperBLCK/AigisSAST/main/assets/header.svg" width="100%" alt="AigisSAST"/>
 
 <h3>ИИ пишет код быстро. AigisSAST проверяет, что он не оставил дыр.</h3>
 
@@ -10,10 +10,10 @@
 
 </div>
 
-<img src="assets/divider.svg" width="100%"/>
+<img src="https://raw.githubusercontent.com/jasperBLCK/AigisSAST/main/assets/divider.svg" width="100%"/>
 
 <div align="center">
-  <img src="assets/demo.svg" width="92%" alt="aigis scan demo"/>
+  <img src="https://raw.githubusercontent.com/jasperBLCK/AigisSAST/main/assets/demo.svg" width="92%" alt="aigis scan demo"/>
 </div>
 
 ## Зачем
@@ -235,8 +235,8 @@ ruff check . && ruff format --check . && pytest -q
 
 ## License
 
-[MIT](LICENSE)
+[MIT](https://github.com/jasperBLCK/AigisSAST/blob/main/LICENSE)
 
-<img src="assets/divider.svg" width="100%"/>
+<img src="https://raw.githubusercontent.com/jasperBLCK/AigisSAST/main/assets/divider.svg" width="100%"/>
 
 <div align="center"><sub>built by <a href="https://github.com/jasperBLCK">jasperBLCK</a> · ship fast, ship secure</sub></div>

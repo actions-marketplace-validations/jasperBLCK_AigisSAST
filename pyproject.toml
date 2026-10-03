@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,13 +7,16 @@ name = "aigis-sast"
 version = "0.2.0"
 description = "AigisSAST: security scanner for AI-generated code. Finds what vibe coding leaves behind and explains how to fix it"
 readme = "README.md"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.9"
 authors = [{ name = "jasperBLCK" }]
 keywords = ["security", "sast", "linter", "secrets", "ai", "vibe-coding", "fastapi"]
 classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
   "Programming Language :: Python :: 3",
-  "License :: OSI Approved :: MIT License",
   "Topic :: Security",
   "Topic :: Software Development :: Quality Assurance",
 ]
@@ -27,6 +30,9 @@ aigis = "aigis.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/jasperBLCK/AigisSAST"
+Source = "https://github.com/jasperBLCK/AigisSAST"
+Issues = "https://github.com/jasperBLCK/AigisSAST/issues"
+Changelog = "https://github.com/jasperBLCK/AigisSAST/releases"
 
 [tool.setuptools.packages.find]
 where = ["src"]
