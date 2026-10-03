@@ -35,9 +35,11 @@ RANDOM_FUNCS = {
 }
 NON_SECURITY_HASH = re.compile(
     r"(content|cache|etag|checksum|file|path|url|text|data|body|chunk|fingerprint|dedup|digest|image|name|title|query"
-    r"|prompt|doc|row|record|payload|bytes|buf|blob|key_str|base_str)",
+    r"|prompt|doc|row|record|payload|bytes|buf|blob|key_str|base_str|(^|_)(id|ids|uuid)$|request|seed|shard|bucket"
+    r"|color|colour|slug|label|tag)",
     re.I,
 )
+SECURITY_HASH = re.compile(r"(passw|pwd|secret|token|salt|otp|auth|credential|api_?key|sign)", re.I)
 SQL_SAFE_PARTS = re.compile(
     r"^(placeholders?|qmarks|marks|ph|param_?str|in_clause|binds?|\w*table\w*|\w*_name|columns?|cols|fields|schema)$",
     re.I,
@@ -271,6 +273,8 @@ class _Visitor(ast.NodeVisitor):
 
     def _non_security_hash(self, node: ast.Call) -> bool:
         names = [*self.assign_names, *(n for a in node.args for n in _names(a))]
+        if any(SECURITY_HASH.search(n) for n in names):
+            return False
         return any(NON_SECURITY_HASH.search(n) for n in names)
 
     def _check_jwt(self, node: ast.Call) -> None:
