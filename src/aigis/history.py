@@ -75,8 +75,10 @@ def _secrets_in_line(path: str, line: str) -> list[tuple[str, str, str]]:
     if p.suffix.lower() in DOC_EXT or is_example(path) or is_test_path(path):
         return out
     m = DB_URL.search(line)
-    if m and not is_placeholder(m.group(1)) and "{" not in m.group(1) and not is_local_default_db(*m.groups()):
-        return [("AIG003", m.group(1), "database URL")]
+    if m:
+        user, password, host = m.groups()
+        if not is_placeholder(password) and "{" not in password and not is_local_default_db(password, host, user):
+            return [("AIG003", password, "database URL")]
     ext = p.suffix.lower()
     is_config = ext in CONFIG_EXT or is_env_file(path)
     secret = generic_secret(line, is_config=is_config, is_code=not is_config, is_dockerfile=False)

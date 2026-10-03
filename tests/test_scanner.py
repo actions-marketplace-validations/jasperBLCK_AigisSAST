@@ -173,3 +173,20 @@ def test_cli_rules_and_explain(capsys):
     assert main(["explain", "aig010"]) == 0
     assert "Как исправить" in capsys.readouterr().out
     assert main(["explain", "NOPE"]) == 2
+
+
+def test_router_level_auth_covers_other_files(tmp_path):
+    route = "from fastapi import APIRouter\nrouter = APIRouter()\n@router.post('/items')\ndef create():\n    pass\n"
+    (tmp_path / "items.py").write_text(route)
+    assert {f.rule.id for f in scan_path(tmp_path).findings} == {"AIG021"}
+    (tmp_path / "debug.py").write_text(
+        "from fastapi import FastAPI, Depends\napp = FastAPI()\n"
+        "@app.post('/x', dependencies=[Depends(verify_debug_key)])\ndef x():\n    pass\n"
+    )
+    assert {f.rule.id for f in scan_path(tmp_path).findings} == {"AIG021"}
+    (tmp_path / "api.py").write_text(
+        "from fastapi import APIRouter, Depends\n"
+        "api = APIRouter(prefix='/v1', dependencies=[Depends(get_current_user)])\n"
+        "api.include_router(router)\n"
+    )
+    assert scan_path(tmp_path).findings == []

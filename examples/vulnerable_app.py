@@ -13,7 +13,7 @@ import yaml
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-TELEGRAM_TOKEN = "7312845567:AAHfakeTokenForDemoPurposesOnly1234"
+TELEGRAM_TOKEN = "7312845567:AAHdemoTokenForDemoPurposesOnly1234"
 SECRET_KEY = "super-secret-jwt-key-2024"
 DATABASE_URL = "postgresql://admin:Qwerty123@db.internal:5432/shop"
 

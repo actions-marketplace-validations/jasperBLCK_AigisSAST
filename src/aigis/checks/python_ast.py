@@ -4,7 +4,14 @@ import ast
 import re
 from collections.abc import Iterator
 
-from aigis.checks.common import is_placeholder, is_secret_name, is_test_path, mask, same_as_name
+from aigis.checks.common import (
+    is_identifier_value,
+    is_placeholder,
+    is_secret_name,
+    is_test_path,
+    mask,
+    same_as_name,
+)
 from aigis.models import Finding, Severity
 from aigis.rules import get
 
@@ -54,7 +61,16 @@ PUBLIC_ROUTE = re.compile(
     r"|confirm|contact|feedback|subscribe|health|ping|metrics)",
     re.I,
 )
-TEST_ONLY_RULES = {"AIG001", "AIG004"}
+TEST_ONLY_RULES = {"AIG001"}
+SQL_KEYWORD = re.compile(
+    r"^\s*\(?\s*(select|insert|update|delete|drop|alter|create|truncate|grant|revoke|pragma|kill|show|describe"
+    r"|with|merge|call|exec|set|begin|vacuum|analyze|copy|lock|comment|exists|explain)\b"
+    r"|\bselect\b[\s\S]*\bfrom\b|\binsert\s+into\b|\bdelete\s+from\b|\bupdate\b[\s\S]*\bset\b"
+    r"|\bwhere\s+[\w.\"]+\s*(=|<|>|!=|\bin\b|\blike\b|\bis\b)|\b(order|group)\s+by\b",
+    re.I,
+)
+MIGRATION_PATH = re.compile(r"(^|/)(migrations|alembic|versions)/")
+PROTECTED_ROUTER = re.compile(r"(user|auth|private|protected|admin|secure)\w*router", re.I)
 TOKENISH = re.compile(r"(token|secret|passw|otp|code|salt|nonce|session|reset|verify|api_?key)", re.I)
 
 
@@ -145,6 +161,7 @@ class _Visitor(ast.NodeVisitor):
             and isinstance(value, ast.Constant)
             and isinstance(value.value, str)
             and not is_placeholder(value.value)
+            and not is_identifier_value(name, value.value)
             and not same_as_name(name, value.value)
         ):
             self.add("AIG002", node, detail=name, secret=value.value)
@@ -166,7 +183,8 @@ class _Visitor(ast.NodeVisitor):
             if name == "DEBUG" and is_const(value, True):
                 self.add("AIG014", node)
             if TOKENISH.search(name) and any(
-                isinstance(n, ast.Call) and dotted(n.func) in RANDOM_FUNCS for n in ast.walk(value)
+                isinstance(n, ast.Call) and dotted(n.func) in RANDOM_FUNCS and not _picks_existing(n)
+                for n in ast.walk(value)
             ):
                 self.add("AIG019", node, detail=name)
 
@@ -201,6 +219,8 @@ class _Visitor(ast.NodeVisitor):
             and node.args
             and is_dynamic_string(node.args[0])
             and not _only_safe_parts(node.args[0])
+            and _looks_like_sql(node.args[0])
+            and not MIGRATION_PATH.search(self.path)
             and (short != "text" or name in {"text", "sqlalchemy.text", "sa.text"})
         ):
             self.add("AIG010", node)
@@ -266,6 +286,8 @@ class _Visitor(ast.NodeVisitor):
 
         if short in {"APIRouter", "FastAPI", "include_router"} and kw(node, "dependencies") is not None:
             self.global_auth = True
+        if PROTECTED_ROUTER.search(short):
+            self.global_auth = True
         if short == "add_middleware" and node.args and "auth" in dotted(node.args[0]).lower():
             self.global_auth = True
 
@@ -275,9 +297,14 @@ class _Visitor(ast.NodeVisitor):
         names = [*self.assign_names, *(n for a in node.args for n in _names(a))]
         if any(SECURITY_HASH.search(n) for n in names):
             return False
+        line = self.lines[node.lineno - 1] if 0 < node.lineno <= len(self.lines) else ""
+        if re.search(r"(hex)?digest\(\)\s*\[\s*:\s*\d+\s*\]", line):
+            return True
         return any(NON_SECURITY_HASH.search(n) for n in names)
 
     def _check_jwt(self, node: ast.Call) -> None:
+        if any("unverified" in n.lower() for n in self.assign_names):
+            return
         options = kw(node, "options")
         if isinstance(options, ast.Dict):
             for key, value in zip(options.keys, options.values):
@@ -309,7 +336,8 @@ class _Visitor(ast.NodeVisitor):
         self.generic_visit(node)
 
     def _mentions_auth(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
-        body = "\n".join(self.lines[node.lineno - 1 : (node.end_lineno or node.lineno)])
+        start = min([node.lineno, *(d.lineno for d in node.decorator_list)])
+        body = "\n".join(self.lines[start - 1 : (node.end_lineno or node.lineno)])
         decorators = " ".join(dotted(d) for d in node.decorator_list)
         return bool(AUTH_HINT.search(body) or AUTH_HINT.search(decorators))
 
@@ -327,11 +355,34 @@ def _public_route(dec: ast.Call) -> bool:
     )
 
 
+def _safe_sql_part(p: ast.AST) -> bool:
+    if isinstance(p, ast.Name):
+        return bool(SQL_SAFE_PARTS.match(p.id) or p.id.isupper())
+    if isinstance(p, ast.Attribute):
+        return bool(SQL_SAFE_PARTS.match(p.attr.lstrip("_")) or p.attr == "__tablename__" or p.attr.isupper())
+    if isinstance(p, ast.Call):
+        return dotted(p.func) in {"int", "float", "len", "bool"}
+    return isinstance(p, ast.Constant)
+
+
 def _only_safe_parts(node: ast.AST) -> bool:
     if not isinstance(node, ast.JoinedStr):
         return False
     parts = [v.value for v in node.values if isinstance(v, ast.FormattedValue)]
-    return bool(parts) and all(isinstance(p, ast.Name) and SQL_SAFE_PARTS.match(p.id) for p in parts)
+    return bool(parts) and all(_safe_sql_part(p) for p in parts)
+
+
+def _looks_like_sql(node: ast.AST) -> bool:
+    text = " ".join(str(n.value) for n in ast.walk(node) if isinstance(n, ast.Constant) and isinstance(n.value, str))
+    return bool(SQL_KEYWORD.search(text))
+
+
+def _picks_existing(call: ast.Call) -> bool:
+    return (
+        dotted(call.func) in {"random.choice", "random.choices", "random.sample"}
+        and bool(call.args)
+        and re.search(r"(key|token|secret|cred|proxy|server|endpoint)", dotted(call.args[0]), re.I) is not None
+    )
 
 
 def _has_depends(func: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:

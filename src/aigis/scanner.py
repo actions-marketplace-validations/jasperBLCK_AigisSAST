@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from aigis.checks.python_ast import check_python
-from aigis.checks.text import check_text, is_env_file
+from aigis.checks.text import check_text, env_has_secret, is_env_file
 from aigis.models import Finding, Severity
 from aigis.rules import get
 
@@ -77,6 +77,12 @@ BINARY_EXT = {
 }
 MAX_FILE_BYTES = 1_000_000
 IGNORE_COMMENT = re.compile(r"aigis:\s*ignore(?:\[([A-Z0-9, ]+)\])?", re.I)
+EXTERNAL_IGNORE = re.compile(r"#\s*nosec\b|noqa:[^#\n]*\bS\d{3}\b|pragma:\s*allowlist\s+secret", re.I)
+ROUTER_AUTH = re.compile(
+    r"\b(APIRouter|FastAPI|include_router|__init__)\([^()]*(?:\([^()]*\)[^()]*)*?"
+    r"dependencies\s*=\s*\[[^\]]*Depends\(\s*\w*(auth|user|token|permission|verify|api_key|login)",
+    re.I,
+)
 
 
 @dataclass
@@ -151,7 +157,8 @@ def _suppressed(finding: Finding, lines: list[str]) -> bool:
             m = IGNORE_COMMENT.search(lines[idx])
             if m and (not m.group(1) or finding.rule.id in {r.strip() for r in m.group(1).split(",")}):
                 return True
-    return False
+    idx = finding.line - 1
+    return 0 <= idx < len(lines) and bool(EXTERNAL_IGNORE.search(lines[idx]))
 
 
 def scan_path(target: Path, *, excludes: list[str] | None = None, min_severity: Severity = Severity.LOW) -> ScanResult:
@@ -161,6 +168,7 @@ def scan_path(target: Path, *, excludes: list[str] | None = None, min_severity: 
     result = ScanResult(root=root)
     in_git = (root / ".git").exists()
     env_ignored = _gitignore_covers_env(root)
+    router_auth = False
 
     for rel in iter_files(target, patterns):
         path = root / rel
@@ -178,17 +186,20 @@ def scan_path(target: Path, *, excludes: list[str] | None = None, min_severity: 
         result.files_scanned += 1
 
         if is_env_file(rel):
-            if in_git or not env_ignored:
+            if (in_git or not env_ignored) and env_has_secret(text):
                 result.findings.append(Finding(get("AIG005"), rel, 1, f"{rel} не в .gitignore"))
             continue
 
         is_python = path.suffix == ".py"
+        router_auth = router_auth or (is_python and bool(ROUTER_AUTH.search(text)))
         found = check_text(rel, text, is_python=is_python)
         if is_python:
             found += check_python(rel, text)
         lines = text.splitlines()
         result.findings.extend(f for f in found if f.effective_severity >= min_severity and not _suppressed(f, lines))
 
+    if router_auth:
+        result.findings = [f for f in result.findings if f.rule.id != "AIG021"]
     result.findings = _dedupe(result.findings)
     result.findings.sort(key=lambda f: f.sort_key)
     return result
