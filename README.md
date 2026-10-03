@@ -35,7 +35,7 @@ AigisSAST ловит именно эти ошибки и объясняет ка
 ## Быстрый старт
 
 ```bash
-pip install git+https://github.com/jasperBLCK/AigisSAST
+pip install aigis-sast
 aigis scan .            # найти проблемы
 aigis fix --dry-run     # посмотреть, что исправится автоматически
 aigis fix               # исправить
@@ -179,7 +179,7 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@v4
-      - uses: jasperBLCK/AigisSAST@v0.2.0
+      - uses: jasperBLCK/AigisSAST@v0.3.0
         with:
           fail-on: high
 ```
@@ -191,7 +191,7 @@ jobs:
 ```yaml
 repos:
   - repo: https://github.com/jasperBLCK/AigisSAST
-    rev: v0.2.0
+    rev: v0.3.0
     hooks:
       - id: aigis
 ```

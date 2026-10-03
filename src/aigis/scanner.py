@@ -34,6 +34,9 @@ DEFAULT_EXCLUDES = [
     "**/yarn.lock",
     "**/pnpm-lock.yaml",
     "**/poetry.lock",
+    "**/uv.lock",
+    "**/Pipfile.lock",
+    "**/bun.lockb",
     "**/.mypy_cache/**",
     "**/.pytest_cache/**",
     "**/.ruff_cache/**",
@@ -110,7 +113,12 @@ def _git_files(root: Path) -> list[str] | None:
 
 
 def _matches(path: str, patterns: Iterable[str]) -> bool:
-    return any(fnmatch.fnmatch(path, pat) or fnmatch.fnmatch(path, pat.rstrip("/*")) for pat in patterns)
+    return any(
+        fnmatch.fnmatch(path, pat)
+        or fnmatch.fnmatch(path, pat.rstrip("/*"))
+        or (pat.startswith("**/") and fnmatch.fnmatch(path, pat[3:]))
+        for pat in patterns
+    )
 
 
 def _load_ignore(root: Path) -> list[str]:

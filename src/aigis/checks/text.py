@@ -3,7 +3,15 @@ from __future__ import annotations
 import re
 from pathlib import PurePosixPath
 
-from aigis.checks.common import SECRET_NAME, is_placeholder, mask
+from aigis.checks.common import (
+    is_dummy_token,
+    is_local_default_db,
+    is_placeholder,
+    is_secret_name,
+    is_test_path,
+    mask,
+    same_as_name,
+)
 from aigis.models import Finding
 from aigis.rules import get
 
@@ -20,13 +28,16 @@ TOKEN_PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 PRIVATE_KEY = re.compile(r"-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY(?: BLOCK)?-----")
 DB_URL = re.compile(
     r"\b(?:postgres(?:ql)?|mysql|mariadb|mongodb(?:\+srv)?|redis|rediss|amqp|mssql)(?:\+\w+)?://"
-    r"[^\s:/@'\"]+:([^\s@'\"]+)@"
+    r"[^\s:/@'\"]+:([^\s@'\"]+)@([^\s:/'\"?]*)"
 )
 CONFIG_ASSIGN = re.compile(r"""^\s*(?:export\s+|-\s+)?["']?([A-Za-z_][\w.\-]*)["']?\s*[:=]\s*["']?([^\s"'#,]+)""")
 DOCKER_ENV = re.compile(r"^\s*(?:ENV|ARG)\s+([A-Za-z_]\w*)[ =]\s*[\"']?([^\s\"']+)", re.I)
-CODE_ASSIGN = re.compile(r"""\b([A-Za-z_$][\w$]*)["']?\s*(?::|=|:=)\s*(["'`])([^"'`\s]{4,})\2""")
-JS_EVAL = re.compile(r"(?<![\w.$])eval\s*\(|\bnew\s+Function\s*\(")
+CODE_ASSIGN = re.compile(r"""(?<!\?\s)(?<!\?)(["']?)\b([A-Za-z_$][\w$]*)\1\s*(?::|=|:=)\s*(["'`])([^"'`\s]{4,})\3""")
+JS_EVAL = re.compile(r"(?<![\w.$])eval\(|\bnew\s+Function\s*\(")
 XSS_SINK = re.compile(r"\.(?:inner|outer)HTML\s*\+?=(?!=)|dangerouslySetInnerHTML|\bv-html\s*=|document\.write\s*\(")
+STATIC_HTML = re.compile(r"""HTML\s*\+?=\s*(["'`])(?:(?!\1).)*\1\s*;?\s*$""")
+I18N_DIRS = {"locales", "locale", "i18n", "lang", "langs", "translations", "l10n"}
+KEY_BODY = re.compile(r"[A-Za-z0-9+/=]{40,}")
 PUBLIC_ENV = re.compile(
     r"\b(?:NEXT_PUBLIC_|VITE_|REACT_APP_|NUXT_PUBLIC_|EXPO_PUBLIC_)\w*?"
     r"(?:SECRET|PRIVATE|PASSWORD|SERVICE_ROLE|API_KEY|TOKEN)\w*"
@@ -71,11 +82,23 @@ def _finding(rule_id: str, path: str, lineno: int, line: str, secret: str | None
 
 def is_env_file(path: str) -> bool:
     name = PurePosixPath(path).name
-    return (name == ".env" or name.startswith(".env.") or name.endswith(".env")) and not name.endswith(EXAMPLE_SUFFIXES)
+    return (name == ".env" or name.startswith(".env.") or name.endswith(".env")) and not is_example(path)
 
 
 def is_example(path: str) -> bool:
-    return PurePosixPath(path).name.endswith(EXAMPLE_SUFFIXES) or ".example." in PurePosixPath(path).name
+    name = PurePosixPath(path).name.lower()
+    return (
+        name.endswith(EXAMPLE_SUFFIXES) or ".example." in name or name.startswith(("example.", "sample.", "template."))
+    )
+
+
+def has_key_body(lines: list[str], i: int) -> bool:
+    line = lines[i - 1]
+    tail = line[PRIVATE_KEY.search(line).end() :]
+    if "..." in tail or "your" in tail.lower():
+        return False
+    nxt = lines[i] if i < len(lines) else ""
+    return bool(KEY_BODY.search(tail) or KEY_BODY.search(nxt) or not tail.strip() and not nxt.strip())
 
 
 def check_text(path: str, text: str, *, is_python: bool) -> list[Finding]:
@@ -88,6 +111,8 @@ def check_text(path: str, text: str, *, is_python: bool) -> list[Finding]:
     is_config = (ext in CONFIG_EXT or is_dockerfile) and not is_example(path)
     is_code = ext in CODE_EXT and not is_example(path)
     is_front = ext in FRONT_EXT
+    in_tests = is_test_path(path)
+    is_i18n = any(part.lower() in I18N_DIRS for part in p.parts[:-1])
 
     findings: list[Finding] = []
     lines = text.splitlines()
@@ -96,16 +121,16 @@ def check_text(path: str, text: str, *, is_python: bool) -> list[Finding]:
             continue
         for label, pattern in TOKEN_PATTERNS:
             m = pattern.search(line)
-            if m:
+            if m and not is_dummy_token(m.group(0)):
                 findings.append(_finding("AIG001", path, i, line, m.group(0), label))
                 break
-        if PRIVATE_KEY.search(line):
+        if PRIVATE_KEY.search(line) and has_key_body(lines, i):
             findings.append(_finding("AIG004", path, i, line))
-        if is_doc or is_example(path):
+        if is_doc or is_example(path) or in_tests or is_i18n:
             continue
 
         m = DB_URL.search(line)
-        if m and not is_placeholder(m.group(1)) and "{" not in m.group(1):
+        if m and not is_placeholder(m.group(1)) and "{" not in m.group(1) and not is_local_default_db(*m.groups()):
             findings.append(_finding("AIG003", path, i, line, m.group(1)))
             continue
 
@@ -119,7 +144,7 @@ def check_text(path: str, text: str, *, is_python: bool) -> list[Finding]:
         if is_front:
             if JS_EVAL.search(line):
                 findings.append(_finding("AIG030", path, i, line))
-            if XSS_SINK.search(line):
+            if XSS_SINK.search(line) and not ("${" not in line and STATIC_HTML.search(line)):
                 findings.append(_finding("AIG031", path, i, line))
             if JS_CORS.search(line):
                 findings.append(_finding("AIG015", path, i, line))
@@ -145,9 +170,9 @@ def generic_secret(line: str, *, is_config: bool, is_code: bool, is_dockerfile: 
         if m:
             candidates.append((m.group(1), m.group(2)))
     if is_code:
-        candidates.extend((m.group(1), m.group(3)) for m in CODE_ASSIGN.finditer(line))
+        candidates.extend((m.group(2), m.group(4)) for m in CODE_ASSIGN.finditer(line))
     for name, value in candidates:
-        if SECRET_NAME.search(name.replace("-", "_").replace(".", "_")) and not is_placeholder(value):
+        if is_secret_name(name) and not is_placeholder(value) and not same_as_name(name, value):
             return name, value
     return None
 

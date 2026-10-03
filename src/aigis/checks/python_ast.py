@@ -4,7 +4,7 @@ import ast
 import re
 from collections.abc import Iterator
 
-from aigis.checks.common import SECRET_NAME, is_placeholder, mask
+from aigis.checks.common import is_placeholder, is_secret_name, is_test_path, mask, same_as_name
 from aigis.models import Finding, Severity
 from aigis.rules import get
 
@@ -33,6 +33,26 @@ RANDOM_FUNCS = {
     "random.getrandbits",
     "random.sample",
 }
+NON_SECURITY_HASH = re.compile(
+    r"(content|cache|etag|checksum|file|path|url|text|data|body|chunk|fingerprint|dedup|digest|image|name|title|query"
+    r"|prompt|doc|row|record|payload|bytes|buf|blob|key_str|base_str)",
+    re.I,
+)
+SQL_SAFE_PARTS = re.compile(
+    r"^(placeholders?|qmarks|marks|ph|param_?str|in_clause|binds?|\w*table\w*|\w*_name|columns?|cols|fields|schema)$",
+    re.I,
+)
+AUTH_HINT = re.compile(
+    r"(auth|current_user|get_user|verify_|token|api_key|apikey|permission|login_required|is_admin|request\.state\.user"
+    r"|x-api-key|credentials|session\[|jwt)",
+    re.I,
+)
+PUBLIC_ROUTE = re.compile(
+    r"(login|logout|register|signup|sign-up|sign_up|token|auth|oauth|callback|webhook|password|forgot|reset|verify"
+    r"|confirm|contact|feedback|subscribe|health|ping|metrics)",
+    re.I,
+)
+TEST_ONLY_RULES = {"AIG001", "AIG004"}
 TOKENISH = re.compile(r"(token|secret|passw|otp|code|salt|nonce|session|reset|verify|api_?key)", re.I)
 
 
@@ -82,7 +102,15 @@ def _has_str(node: ast.AST) -> bool:
 
 
 def secret_name(name: str) -> bool:
-    return bool(SECRET_NAME.search(name))
+    return is_secret_name(name)
+
+
+def _names(node: ast.AST) -> Iterator[str]:
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Name):
+            yield sub.id
+        elif isinstance(sub, ast.Attribute):
+            yield sub.attr
 
 
 class _Visitor(ast.NodeVisitor):
@@ -92,6 +120,7 @@ class _Visitor(ast.NodeVisitor):
         self.findings: list[Finding] = []
         self.is_fastapi = "fastapi" in source
         self.global_auth = False
+        self.assign_names: list[str] = []
 
     def add(
         self,
@@ -114,6 +143,7 @@ class _Visitor(ast.NodeVisitor):
             and isinstance(value, ast.Constant)
             and isinstance(value.value, str)
             and not is_placeholder(value.value)
+            and not same_as_name(name, value.value)
         ):
             self.add("AIG002", node, detail=name, secret=value.value)
 
@@ -140,11 +170,15 @@ class _Visitor(ast.NodeVisitor):
 
     def visit_Assign(self, node: ast.Assign) -> None:
         self._check_assign(node)
+        self.assign_names = list(self._targets(node))
         self.generic_visit(node)
+        self.assign_names = []
 
     def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
         self._check_assign(node)
+        self.assign_names = list(self._targets(node))
         self.generic_visit(node)
+        self.assign_names = []
 
     def visit_Dict(self, node: ast.Dict) -> None:
         for key, value in zip(node.keys, node.values):
@@ -164,6 +198,7 @@ class _Visitor(ast.NodeVisitor):
             short in SQL_SINKS
             and node.args
             and is_dynamic_string(node.args[0])
+            and not _only_safe_parts(node.args[0])
             and (short != "text" or name in {"text", "sqlalchemy.text", "sa.text"})
         ):
             self.add("AIG010", node)
@@ -213,7 +248,11 @@ class _Visitor(ast.NodeVisitor):
         if name.endswith("jwt.decode"):
             self._check_jwt(node)
 
-        if name in {"hashlib.md5", "hashlib.sha1", "md5", "sha1"} and not is_const(kw(node, "usedforsecurity"), False):
+        if (
+            name in {"hashlib.md5", "hashlib.sha1", "md5", "sha1"}
+            and not is_const(kw(node, "usedforsecurity"), False)
+            and not self._non_security_hash(node)
+        ):
             self.add("AIG018", node)
         if (
             name == "hashlib.new"
@@ -223,10 +262,16 @@ class _Visitor(ast.NodeVisitor):
         ):
             self.add("AIG018", node)
 
-        if short in {"APIRouter", "FastAPI"} and kw(node, "dependencies") is not None:
+        if short in {"APIRouter", "FastAPI", "include_router"} and kw(node, "dependencies") is not None:
+            self.global_auth = True
+        if short == "add_middleware" and node.args and "auth" in dotted(node.args[0]).lower():
             self.global_auth = True
 
         self.generic_visit(node)
+
+    def _non_security_hash(self, node: ast.Call) -> bool:
+        names = [*self.assign_names, *(n for a in node.args for n in _names(a))]
+        return any(NON_SECURITY_HASH.search(n) for n in names)
 
     def _check_jwt(self, node: ast.Call) -> None:
         options = kw(node, "options")
@@ -253,9 +298,16 @@ class _Visitor(ast.NodeVisitor):
                     and dec.func.attr in MUTATING_METHODS
                     and kw(dec, "dependencies") is None
                     and not _has_depends(node)
+                    and not _public_route(dec)
+                    and not self._mentions_auth(node)
                 ):
                     self.add("AIG021", dec, detail=f"{dec.func.attr.upper()} {node.name}")
         self.generic_visit(node)
+
+    def _mentions_auth(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
+        body = "\n".join(self.lines[node.lineno - 1 : (node.end_lineno or node.lineno)])
+        decorators = " ".join(dotted(d) for d in node.decorator_list)
+        return bool(AUTH_HINT.search(body) or AUTH_HINT.search(decorators))
 
     visit_FunctionDef = _visit_func
     visit_AsyncFunctionDef = _visit_func
@@ -263,6 +315,19 @@ class _Visitor(ast.NodeVisitor):
 
 def is_const_str(node: ast.AST | None, value: str) -> bool:
     return isinstance(node, ast.Constant) and node.value == value
+
+
+def _public_route(dec: ast.Call) -> bool:
+    return (
+        bool(dec.args) and isinstance(dec.args[0], ast.Constant) and bool(PUBLIC_ROUTE.search(str(dec.args[0].value)))
+    )
+
+
+def _only_safe_parts(node: ast.AST) -> bool:
+    if not isinstance(node, ast.JoinedStr):
+        return False
+    parts = [v.value for v in node.values if isinstance(v, ast.FormattedValue)]
+    return bool(parts) and all(isinstance(p, ast.Name) and SQL_SAFE_PARTS.match(p.id) for p in parts)
 
 
 def _has_depends(func: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
@@ -283,6 +348,9 @@ def check_python(path: str, source: str) -> list[Finding]:
         return []
     visitor = _Visitor(path, source.splitlines(), source)
     visitor.visit(tree)
+    findings = visitor.findings
     if visitor.global_auth:
-        return [f for f in visitor.findings if f.rule.id != "AIG021"]
-    return visitor.findings
+        findings = [f for f in findings if f.rule.id != "AIG021"]
+    if is_test_path(path):
+        findings = [f for f in findings if f.rule.id in TEST_ONLY_RULES]
+    return findings

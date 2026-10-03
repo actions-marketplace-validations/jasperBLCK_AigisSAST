@@ -5,7 +5,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
-from aigis.checks.common import is_placeholder, mask
+from aigis.checks.common import is_dummy_token, is_local_default_db, is_placeholder, is_test_path, mask
 from aigis.checks.text import (
     CONFIG_EXT,
     DB_URL,
@@ -67,15 +67,15 @@ def _secrets_in_line(path: str, line: str) -> list[tuple[str, str, str]]:
     out = []
     for label, pattern in TOKEN_PATTERNS:
         m = pattern.search(line)
-        if m:
+        if m and not is_dummy_token(m.group(0)):
             return [("AIG001", m.group(0), label)]
-    if PRIVATE_KEY.search(line):
+    if PRIVATE_KEY.search(line) and not ("..." in line or "your" in line.lower()):
         return [("AIG004", line.strip(), "private key")]
     p = PurePosixPath(path)
-    if p.suffix.lower() in DOC_EXT or is_example(path):
+    if p.suffix.lower() in DOC_EXT or is_example(path) or is_test_path(path):
         return out
     m = DB_URL.search(line)
-    if m and not is_placeholder(m.group(1)) and "{" not in m.group(1):
+    if m and not is_placeholder(m.group(1)) and "{" not in m.group(1) and not is_local_default_db(*m.groups()):
         return [("AIG003", m.group(1), "database URL")]
     ext = p.suffix.lower()
     is_config = ext in CONFIG_EXT or is_env_file(path)
