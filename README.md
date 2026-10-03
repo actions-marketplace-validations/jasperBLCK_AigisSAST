@@ -96,7 +96,7 @@ aigis scan . -f markdown > SECURITY.md    # отчёт для PR / заказч�
 
 ```python
 eval(trusted_expr)  # aigis: ignore
-DEBUG = True        # aigis: ignore[AIG014]
+DEBUG = True  # aigis: ignore[AIG014]
 ```
 
 Файлы и папки исключаются через `.aigisignore` (glob-шаблоны) или флаг `--exclude`.
