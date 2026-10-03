@@ -1,0 +1,9 @@
+services:
+  api:
+    build: .
+    environment:
+      POSTGRES_PASSWORD: Qwerty123
+  db:
+    image: postgres:16
+    ports:
+      - "5432:5432"

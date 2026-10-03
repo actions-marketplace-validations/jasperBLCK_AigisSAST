@@ -1,0 +1,7 @@
+- id: aigis
+  name: AigisSAST
+  description: Security scanner for AI-generated code
+  entry: aigis scan --quiet
+  language: python
+  pass_filenames: true
+  types: [text]

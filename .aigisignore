@@ -1,0 +1,3 @@
+# intentionally vulnerable demo and test fixtures
+examples/**
+tests/**

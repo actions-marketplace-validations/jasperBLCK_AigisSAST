@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="360" viewBox="0 0 1200 360">
+<style>
+text{font-family:'JetBrains Mono','SF Mono',Menlo,Consolas,'Liberation Mono','Courier New',monospace}
+.c{font-size:13px;fill:#fff;opacity:0;animation:code 6s infinite}
+@keyframes code{0%{opacity:0}8%{opacity:.28}70%{opacity:.28}100%{opacity:0}}
+.f{font-size:13px;fill:#fff;letter-spacing:1px;opacity:0;animation:flag 6s infinite}
+@keyframes flag{0%{opacity:0;transform:translateX(20px)}6%{opacity:.9;transform:none}70%{opacity:.9}100%{opacity:0}}
+.draw{stroke-dasharray:900;stroke-dashoffset:900;animation:draw 2.2s .2s cubic-bezier(.6,0,.2,1) forwards}
+@keyframes draw{to{stroke-dashoffset:0}}
+.radar{transform-origin:600px 165px;animation:spin 3s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.pulse{transform-origin:600px 165px;animation:pulse 2.4s ease-out infinite}
+@keyframes pulse{0%{transform:scale(.6);opacity:.7}100%{transform:scale(1.6);opacity:0}}
+.title{opacity:0;animation:in 1s 1.2s forwards, flick 7s 2.2s infinite}
+@keyframes in{to{opacity:1}}
+@keyframes flick{0%,100%{opacity:1}62%{opacity:1}63%{opacity:.3}64%{opacity:1}65%{opacity:.5}66%{opacity:1}}
+.g{opacity:0;animation:g 3.6s 2.2s infinite steps(1)}
+@keyframes g{0%,86%,100%{opacity:0;transform:none}88%{opacity:.8;transform:translate(-7px,1px);clip-path:inset(80% 0 12% 0)}91%{opacity:.8;transform:translate(6px,-1px);clip-path:inset(86% 0 6% 0)}94%{opacity:0}}
+.sub{opacity:0;animation:in 1s 1.8s forwards}
+.sweep{animation:sweep 6s linear infinite}
+@keyframes sweep{from{transform:translateY(-40px)}to{transform:translateY(360px)}}
+.cur{animation:blink 1s steps(1) infinite}@keyframes blink{50%{opacity:0}}
+</style>
+<defs>
+<radialGradient id="vig" cx=".5" cy=".45" r=".7"><stop offset=".3" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".9"/></radialGradient>
+<linearGradient id="sw" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset="1" stop-color="#fff" stop-opacity=".12"/></linearGradient>
+<linearGradient id="beam" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#fff" stop-opacity=".45"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+<clipPath id="sh"><path d="M600 50 L695 85 L695 170 C695 235 650 270 600 290 C550 270 505 235 505 170 L505 85 Z"/></clipPath>
+<pattern id="scan" width="4" height="4" patternUnits="userSpaceOnUse"><rect width="4" height="1" fill="#fff" fill-opacity=".03"/></pattern>
+</defs>
+<rect width="1200" height="360" fill="#000"/>
+<text x="40" y="40" class="c" style="animation-delay:0.00s">def get_user(name):</text><text x="40" y="60" class="c" style="animation-delay:0.35s">    q = f&quot;SELECT * FROM users WHERE n=&#x27;{name}&#x27;&quot;</text><text x="40" y="80" class="c" style="animation-delay:0.70s">    return db.execute(q)</text><text x="40" y="100" class="c" style="animation-delay:1.05s"></text><text x="40" y="120" class="c" style="animation-delay:1.40s">TOKEN = &quot;7312845567:AAH****&quot;</text><text x="40" y="140" class="c" style="animation-delay:1.75s">app = FastAPI(debug=True)</text><text x="40" y="160" class="c" style="animation-delay:2.10s">allow_origins=[&quot;*&quot;]</text><text x="40" y="180" class="c" style="animation-delay:2.45s">subprocess.run(cmd, shell=True)</text><text x="40" y="200" class="c" style="animation-delay:2.80s">data = pickle.loads(blob)</text><text x="40" y="220" class="c" style="animation-delay:3.15s">jwt.decode(t, verify=False)</text><text x="40" y="240" class="c" style="animation-delay:3.50s">hashlib.md5(pwd)</text><text x="40" y="260" class="c" style="animation-delay:3.85s">requests.get(u, verify=False)</text><text x="40" y="280" class="c" style="animation-delay:4.20s">eval(expr)</text><text x="40" y="300" class="c" style="animation-delay:4.55s">DEBUG = True</text><text x="40" y="320" class="c" style="animation-delay:4.90s">ports: - &quot;5432:5432&quot;</text><text x="40" y="340" class="c" style="animation-delay:5.25s">yaml.load(cfg)</text><text x="1160" y="40" text-anchor="end" class="f" style="animation-delay:0.60s">[!] AIG010 sql-injection</text><text x="1160" y="70" text-anchor="end" class="f" style="animation-delay:1.05s">[!] AIG001 hardcoded-token</text><text x="1160" y="100" text-anchor="end" class="f" style="animation-delay:1.50s">[!] AIG014 debug-enabled</text><text x="1160" y="130" text-anchor="end" class="f" style="animation-delay:1.95s">[!] AIG015 cors-wildcard</text><text x="1160" y="160" text-anchor="end" class="f" style="animation-delay:2.40s">[!] AIG011 shell-injection</text><text x="1160" y="190" text-anchor="end" class="f" style="animation-delay:2.85s">[!] AIG013 deserialization</text><text x="1160" y="220" text-anchor="end" class="f" style="animation-delay:3.30s">[!] AIG017 jwt-no-verify</text><text x="1160" y="250" text-anchor="end" class="f" style="animation-delay:3.75s">[!] AIG018 weak-hash</text><text x="1160" y="280" text-anchor="end" class="f" style="animation-delay:4.20s">[!] AIG016 tls-off</text><text x="1160" y="310" text-anchor="end" class="f" style="animation-delay:4.65s">[!] AIG012 eval</text>
+<rect width="1200" height="360" fill="url(#vig)"/>
+<rect x="340" y="0" width="520" height="360" fill="#000" opacity=".55"/>
+<g class="sweep"><rect width="1200" height="40" fill="url(#sw)"/></g>
+<g clip-path="url(#sh)">
+<rect x="500" y="45" width="200" height="250" fill="#050505"/>
+<circle cx="600" cy="165" r="40" fill="none" stroke="#fff" stroke-opacity=".12"/>
+<circle cx="600" cy="165" r="75" fill="none" stroke="#fff" stroke-opacity=".12"/>
+<path d="M500 165H700M600 45V295" stroke="#fff" stroke-opacity=".1"/>
+<g class="radar"><path d="M600 165 L730 125 A140 140 0 0 1 738 177 Z" fill="url(#beam)"/></g>
+<circle cx="600" cy="165" r="60" fill="none" stroke="#fff" stroke-width="1.5" class="pulse"/>
+<circle cx="642" cy="127" r="3.5" fill="#fff" class="cur"/>
+<circle cx="570" cy="217" r="3" fill="#fff" class="cur" style="animation-delay:.5s"/>
+</g>
+<path d="M600 50 L695 85 L695 170 C695 235 650 270 600 290 C550 270 505 235 505 170 L505 85 Z" fill="none" stroke="#fff" stroke-width="3" class="draw"/>
+<path d="M564 169 l24 24 l50 -52" fill="none" stroke="#fff" stroke-width="7" stroke-linecap="square" class="draw" style="animation-delay:1.4s"/>
+<rect width="1200" height="360" fill="url(#scan)"/>
+<g font-size="54" font-weight="800" text-anchor="middle" letter-spacing="2">
+<text x="600" y="345" fill="#fff" class="g">AigisSAST</text>
+<text x="600" y="345" fill="#fff" class="title">AigisSAST</text>
+</g>
+</svg>

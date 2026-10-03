@@ -1,0 +1,49 @@
+name: AigisSAST
+description: Security scanner for AI-generated code. Finds hardcoded secrets, injections and insecure defaults.
+author: jasperBLCK
+branding:
+  icon: shield
+  color: gray-dark
+
+inputs:
+  path:
+    description: Path to scan
+    default: "."
+  fail-on:
+    description: Fail the job on findings of this severity or higher (low, medium, high, critical, none)
+    default: high
+  min-severity:
+    description: Hide findings below this severity
+    default: low
+  sarif:
+    description: Upload results to GitHub code scanning (needs `security-events write` permission)
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Install AigisSAST
+      shell: bash
+      run: pip install --quiet "${{ github.action_path }}"
+
+    - name: Scan (SARIF)
+      if: inputs.sarif == 'true'
+      shell: bash
+      run: aigis scan "${{ inputs.path }}" --format sarif --output aigis.sarif --min-severity "${{ inputs.min-severity }}" --fail-on none
+
+    - name: Upload to code scanning
+      if: inputs.sarif == 'true'
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: aigis.sarif
+        category: aigis-sast
+
+    - name: Scan
+      shell: bash
+      env:
+        FORCE_COLOR: "1"
+      run: aigis scan "${{ inputs.path }}" --color --min-severity "${{ inputs.min-severity }}" --fail-on "${{ inputs.fail-on }}"
