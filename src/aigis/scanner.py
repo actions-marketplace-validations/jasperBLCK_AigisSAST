@@ -187,7 +187,7 @@ def scan_path(target: Path, *, excludes: list[str] | None = None, min_severity: 
 
         if is_env_file(rel):
             if (in_git or not env_ignored) and env_has_secret(text):
-                result.findings.append(Finding(get("AIG005"), rel, 1, f"{rel} не в .gitignore"))
+                result.findings.append(Finding(get("AIG005"), rel, 1, f"{rel} ∉ .gitignore"))
             continue
 
         is_python = path.suffix == ".py"

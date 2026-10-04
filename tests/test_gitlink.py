@@ -1,4 +1,8 @@
+import json
+import subprocess
+
 from aigis import gitlink
+from aigis.cli import main
 
 
 def test_web_base_variants():
@@ -41,3 +45,20 @@ def test_repo_web_on_real_checkout(tmp_path):
 def test_repo_web_no_git(tmp_path):
     gitlink.repo_web.cache_clear()
     assert gitlink.repo_web(str(tmp_path)) == (None, None)
+
+
+def test_scan_links_include_subdirectory(tmp_path):
+    sub = tmp_path / "svc"
+    sub.mkdir()
+    (sub / "x.py").write_text("eval(x)\n")
+    run = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-C", str(tmp_path)]
+    subprocess.run([*run, "init", "-q"], check=True)
+    subprocess.run([*run, "remote", "add", "origin", "git@github.com:o/r.git"], check=True)
+    subprocess.run([*run, "add", "."], check=True)
+    subprocess.run([*run, "commit", "-qm", "x"], check=True)
+    gitlink.repo_web.cache_clear()
+    gitlink.repo_prefix.cache_clear()
+    out = tmp_path / "r.json"
+    main(["scan", str(sub), "-f", "json", "-o", str(out)])
+    url = json.loads(out.read_text())["findings"][0]["url"]
+    assert url.startswith("https://github.com/o/r/blob/") and url.endswith("/svc/x.py#L1")

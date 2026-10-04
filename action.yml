@@ -18,6 +18,9 @@ inputs:
   sarif:
     description: Upload results to GitHub code scanning (needs `security-events write` permission)
     default: "true"
+  lang:
+    description: Report language (en, ru)
+    default: en
 
 runs:
   using: composite
@@ -33,6 +36,8 @@ runs:
     - name: Scan (SARIF)
       if: inputs.sarif == 'true'
       shell: bash
+      env:
+        AIGIS_LANG: ${{ inputs.lang }}
       run: aigis scan "${{ inputs.path }}" --format sarif --output aigis.sarif --min-severity "${{ inputs.min-severity }}" --fail-on none
 
     - name: Upload to code scanning
@@ -46,4 +51,5 @@ runs:
       shell: bash
       env:
         FORCE_COLOR: "1"
+        AIGIS_LANG: ${{ inputs.lang }}
       run: aigis scan "${{ inputs.path }}" --color --min-severity "${{ inputs.min-severity }}" --fail-on "${{ inputs.fail-on }}"

@@ -3,11 +3,14 @@ from __future__ import annotations
 import json
 import os
 import sys
+import textwrap
 from collections import defaultdict
+from collections.abc import Callable
 from typing import TextIO
 
 from aigis import __version__, gitlink
-from aigis.models import Finding, Severity
+from aigis.i18n import pick, tr
+from aigis.models import Finding, Rule, Severity
 from aigis.rules import RULES
 from aigis.scanner import ScanResult
 
@@ -31,11 +34,12 @@ class Style:
 
 
 SEV_STYLE = {
-    Severity.CRITICAL: ("1", "7"),
-    Severity.HIGH: ("1", "97"),
-    Severity.MEDIUM: ("37",),
+    Severity.CRITICAL: ("1", "97", "41"),
+    Severity.HIGH: ("1", "91"),
+    Severity.MEDIUM: ("1", "93"),
     Severity.LOW: ("2",),
 }
+GRADE_STYLE = {"A": "42", "B": "42", "C": "43", "D": "41", "F": "41"}
 
 
 def use_color(stream: TextIO, force: bool | None) -> bool:
@@ -46,21 +50,51 @@ def use_color(stream: TextIO, force: bool | None) -> bool:
     return hasattr(stream, "isatty") and stream.isatty()
 
 
+WRAP = 100
+LinkFn = Callable[[str, int], str]
+
+
 def _indent(text: str, prefix: str) -> str:
     return "\n".join(prefix + ln for ln in text.splitlines())
 
 
-def render_text(result: ScanResult, *, color: bool, verbose: bool = True) -> str:
-    st = Style(color)
+def _prose(text: str, prefix: str) -> str:
+    return "\n".join(textwrap.fill(p, WRAP, initial_indent=prefix, subsequent_indent=prefix) for p in text.splitlines())
+
+
+def _linker(result: ScanResult) -> LinkFn | None:
     base, sha = gitlink.repo_web(str(result.root))
+    if not base or not sha:
+        return None
+    prefix = gitlink.repo_prefix(str(result.root))
+    return lambda path, line: gitlink.file_url(base, sha, prefix + path, line)
+
+
+def _title(f: Finding, lang: str) -> str:
+    return pick(f.rule.title, lang) + (f" ({f.detail})" if f.detail else "")
+
+
+def _summary(result: ScanResult, st: Style) -> str:
+    return "  ".join(
+        st(f"■ {s.label} {result.count(s)}", *SEV_STYLE[s]) if result.count(s) else st(f"□ {s.label} 0", "2")
+        for s in sorted(Severity, reverse=True)
+    )
+
+
+def render_text(result: ScanResult, *, color: bool, verbose: bool = True, lang: str = "en") -> str:
+    st = Style(color)
+    link = _linker(result)
     out = [
         st(BANNER.rstrip("\n"), "1"),
-        st(f"  v{__version__}  //  security scanner for AI-generated code", "2"),
+        st(f"  v{__version__}  //  {tr(lang, 'tagline')}", "2"),
+        "",
+        st(f"  {tr(lang, 'target')} {result.root}", "2"),
+        st(f"  {tr(lang, 'files')} {result.files_scanned}", "2")
+        + st(f"   {tr(lang, 'findings')} ", "2")
+        + st(str(len(result.findings)), "1"),
+        f"  {_summary(result, st)}",
         "",
     ]
-    out.append(st(f"  target: {result.root}", "2"))
-    out.append(st(f"  files:  {result.files_scanned}", "2"))
-    out.append("")
 
     by_file: dict[str, list[Finding]] = defaultdict(list)
     for f in result.findings:
@@ -71,61 +105,68 @@ def render_text(result: ScanResult, *, color: bool, verbose: bool = True) -> str
         for f in by_file[path]:
             sev = f.effective_severity
             tag = st(f" {sev.name:<8} ", *SEV_STYLE[sev])
-            title = f.rule.title + (f" ({f.detail})" if f.detail else "")
-            out.append(f"  {tag} {st(f.rule.id, '1')}  {title}")
+            out.append(f"  {tag} {st(f.rule.id, '1')}  {_title(f, lang)}")
             out.append(st(f"           {path}:{f.line}", "2"))
-            if base:
-                out.append(st(f"           {gitlink.file_url(base, sha, path, f.line)}", "2", "4"))
+            if link:
+                out.append(st("           ↗ ", "2") + st(link(path, f.line), "36", "4"))
             if f.snippet:
                 out.append(f"           {st('│', '2')} {f.snippet}")
             if verbose:
-                out.append(st("           чем опасно:", "1"))
-                out.append(_indent(f.rule.why, "             "))
-                out.append(st("           как исправить:", "1"))
-                out.append(_indent(f.ai_fix or f.rule.fix, "             "))
+                out.append(st(f"           {tr(lang, 'why')}", "1"))
+                out.append(_prose(pick(f.rule.why, lang), "             "))
+                out.append(st(f"           {tr(lang, 'how')}", "1", "32"))
+                out.append(
+                    _prose(f.ai_fix, "             ") if f.ai_fix else _prose(pick(f.rule.fix, lang), "             ")
+                )
                 if f.rule.example and not f.ai_fix:
                     out.append(_indent(f.rule.example, st("             │ ", "2")))
             out.append("")
 
     out.append(st("─" * 64, "2"))
     if not result.findings:
-        out.append(st("  ✓ чисто: ничего опасного не найдено", "1"))
-    counts = "   ".join(f"{s.name.lower()}: {st(str(result.count(s)), '1')}" for s in sorted(Severity, reverse=True))
-    out.append(f"  {counts}")
-    out.append(f"  security score: {st(f'{result.score}/100', '1')}  grade {st(f' {result.grade} ', '1', '7')}")
+        out.append(st(f"  {tr(lang, 'clean')}", "1", "32"))
+    out.append(f"  {_summary(result, st)}")
+    out.append(
+        f"  {tr(lang, 'score')} {st(f'{result.score}/100', '1')}   "
+        f"{tr(lang, 'grade')} {st(f' {result.grade} ', '1', '97', GRADE_STYLE[result.grade])}"
+    )
+    if result.findings:
+        top = min(result.findings, key=lambda f: f.sort_key)
+        out.append(st(f"  {tr(lang, 'fix_first')} ", "2") + f"{top.rule.id} {top.path}:{top.line}")
     out.append("")
     return "\n".join(out)
 
 
-def _finding_dict(f: Finding, base: str | None = None, sha: str | None = None) -> dict[str, object]:
+def _finding_dict(f: Finding, link: LinkFn | None, lang: str) -> dict[str, object]:
     d: dict[str, object] = {
         "rule": f.rule.id,
         "slug": f.rule.slug,
         "severity": f.effective_severity.label,
-        "title": f.rule.title,
+        "title": pick(f.rule.title, lang),
         "path": f.path,
         "line": f.line,
         "snippet": f.snippet,
         "detail": f.detail,
-        "why": f.rule.why,
-        "fix": f.ai_fix or f.rule.fix,
+        "why": pick(f.rule.why, lang),
+        "fix": f.ai_fix or pick(f.rule.fix, lang),
     }
-    if base:
-        d["url"] = gitlink.file_url(base, sha, f.path, f.line)
+    if link:
+        d["url"] = link(f.path, f.line)
     return d
 
 
-def render_json(result: ScanResult) -> str:
-    base, sha = gitlink.repo_web(str(result.root))
+def render_json(result: ScanResult, lang: str = "en") -> str:
+    link = _linker(result)
     return json.dumps(
         {
             "tool": "AigisSAST",
             "version": __version__,
+            "lang": lang,
             "files_scanned": result.files_scanned,
             "score": result.score,
             "grade": result.grade,
             "summary": {s.label: result.count(s) for s in Severity},
-            "findings": [_finding_dict(f, base, sha) for f in result.findings],
+            "findings": [_finding_dict(f, link, lang) for f in result.findings],
         },
         ensure_ascii=False,
         indent=2,
@@ -146,14 +187,17 @@ SECURITY_SEVERITY = {
 }
 
 
-def render_sarif(result: ScanResult) -> str:
+def render_sarif(result: ScanResult, lang: str = "en") -> str:
     rules = [
         {
             "id": r.id,
             "name": r.slug,
-            "shortDescription": {"text": r.title},
-            "fullDescription": {"text": r.why},
-            "help": {"text": f"{r.fix}\n\n{r.example}".strip(), "markdown": _rule_markdown_help(r.id)},
+            "shortDescription": {"text": pick(r.title, lang)},
+            "fullDescription": {"text": pick(r.why, lang)},
+            "help": {
+                "text": f"{pick(r.fix, lang)}\n\n{r.example}".strip(),
+                "markdown": rule_markdown_help(r, lang),
+            },
             "defaultConfiguration": {"level": SARIF_LEVEL[r.severity]},
             "properties": {"tags": ["security"], "security-severity": SECURITY_SEVERITY[r.severity]},
         }
@@ -163,7 +207,9 @@ def render_sarif(result: ScanResult) -> str:
         {
             "ruleId": f.rule.id,
             "level": SARIF_LEVEL[f.effective_severity],
-            "message": {"text": f"{f.rule.title}{': ' + f.detail if f.detail else ''}. {f.rule.fix}"},
+            "message": {
+                "text": f"{pick(f.rule.title, lang)}{': ' + f.detail if f.detail else ''}. {pick(f.rule.fix, lang)}"
+            },
             "locations": [
                 {
                     "physicalLocation": {
@@ -196,50 +242,51 @@ def render_sarif(result: ScanResult) -> str:
     return json.dumps(sarif, ensure_ascii=False, indent=2)
 
 
-def _rule_markdown_help(rule_id: str) -> str:
-    r = RULES[rule_id]
-    md = f"**Чем опасно:** {r.why}\n\n**Как исправить:** {r.fix}"
+def rule_markdown_help(r: Rule, lang: str = "en") -> str:
+    md = f"**{tr(lang, 'explain_why')}** {pick(r.why, lang)}\n\n**{tr(lang, 'explain_fix')}** {pick(r.fix, lang)}"
     if r.example:
         md += f"\n\n```\n{r.example}\n```"
     return md
 
 
-def render_markdown(result: ScanResult) -> str:
-    base, sha = gitlink.repo_web(str(result.root))
+def render_markdown(result: ScanResult, lang: str = "en") -> str:
+    link = _linker(result)
     out = [
-        "## AigisSAST report",
+        f"## {tr(lang, 'md_report')}",
         "",
-        f"**Score:** {result.score}/100 · **Grade:** `{result.grade}` · **Files:** {result.files_scanned}",
+        f"**{tr(lang, 'md_score')}:** {result.score}/100 · **{tr(lang, 'md_grade')}:** `{result.grade}` · "
+        f"**{tr(lang, 'md_files')}:** {result.files_scanned}",
         "",
-        "| Severity | Count |",
+        f"| {tr(lang, 'md_severity')} | {tr(lang, 'md_count')} |",
         "|---|---|",
         *[f"| {s.name} | {result.count(s)} |" for s in sorted(Severity, reverse=True)],
         "",
     ]
     if not result.findings:
-        out.append("No issues found.")
+        out.append(tr(lang, "md_none"))
     for f in result.findings:
+        loc = f"`{f.path}:{f.line}`"
         out += [
-            f"### `{f.effective_severity.name}` {f.rule.id} · {f.rule.title}",
-            f"[`{f.path}:{f.line}`]({gitlink.file_url(base, sha, f.path, f.line)})" if base else f"`{f.path}:{f.line}`",
+            f"### `{f.effective_severity.name}` {f.rule.id} · {_title(f, lang)}",
+            f"[{loc}]({link(f.path, f.line)})" if link else loc,
             "",
             f"```\n{f.snippet}\n```" if f.snippet else "",
-            f"**Чем опасно:** {f.rule.why}",
+            f"**{tr(lang, 'explain_why')}** {pick(f.rule.why, lang)}",
             "",
-            f"**Как исправить:** {f.ai_fix or f.rule.fix}",
+            f"**{tr(lang, 'explain_fix')}** {f.ai_fix or pick(f.rule.fix, lang)}",
             "",
         ]
     return "\n".join(out)
 
 
-def render(result: ScanResult, fmt: str, *, color: bool, verbose: bool = True) -> str:
+def render(result: ScanResult, fmt: str, *, color: bool, verbose: bool = True, lang: str = "en") -> str:
     if fmt == "json":
-        return render_json(result)
+        return render_json(result, lang)
     if fmt == "sarif":
-        return render_sarif(result)
+        return render_sarif(result, lang)
     if fmt == "markdown":
-        return render_markdown(result)
-    return render_text(result, color=color, verbose=verbose)
+        return render_markdown(result, lang)
+    return render_text(result, color=color, verbose=verbose, lang=lang)
 
 
 def write(text: str, path: str | None) -> None:

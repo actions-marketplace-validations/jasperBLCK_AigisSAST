@@ -170,8 +170,10 @@ def test_cli_exit_codes_and_formats(tmp_path, capsys):
 def test_cli_rules_and_explain(capsys):
     assert main(["rules"]) == 0
     assert "AIG010" in capsys.readouterr().out
-    assert main(["explain", "aig010"]) == 0
+    assert main(["explain", "aig010", "--lang", "ru"]) == 0
     assert "Как исправить" in capsys.readouterr().out
+    assert main(["--lang", "en", "explain", "aig010"]) == 0
+    assert "How to fix" in capsys.readouterr().out
     assert main(["explain", "NOPE"]) == 2
 
 

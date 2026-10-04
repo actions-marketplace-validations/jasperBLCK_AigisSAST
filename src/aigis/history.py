@@ -91,9 +91,9 @@ def _git(root: Path, *args: str) -> str:
     try:
         proc = subprocess.run(["git", "-C", str(root), *args], capture_output=True, timeout=300, check=True)
     except FileNotFoundError as exc:
-        raise NotARepo("git не установлен") from exc
+        raise NotARepo("err_no_git") from exc
     except subprocess.CalledProcessError as exc:
-        raise NotARepo(exc.stderr.decode("utf-8", "replace").strip() or "не git-репозиторий") from exc
+        raise NotARepo("err_not_repo") from exc
     return proc.stdout.decode("utf-8", "replace")
 
 

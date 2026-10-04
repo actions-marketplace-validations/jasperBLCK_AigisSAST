@@ -21,12 +21,14 @@ class Severity(IntEnum):
 
 @dataclass(frozen=True)
 class Rule:
+    """A rule. `title`, `why` and `fix` are bilingual: {"en": ..., "ru": ...}."""
+
     id: str
     slug: str
     severity: Severity
-    title: str
-    why: str
-    fix: str
+    title: dict[str, str]
+    why: dict[str, str]
+    fix: dict[str, str]
     example: str = ""
 
 

@@ -58,6 +58,12 @@ def repo_web(root_str: str) -> tuple[str | None, str | None]:
     return base, sha
 
 
+@lru_cache(maxsize=64)
+def repo_prefix(root_str: str) -> str:
+    """Path of the scanned directory inside its git checkout, e.g. "examples/" (or "")."""
+    return _git(Path(root_str), "rev-parse", "--show-prefix") or ""
+
+
 def file_url(base: str, ref: str, path: str, line: int | None = None) -> str:
     sep = "/src/" if "bitbucket.org" in base else "/blob/"
     url = f"{base}{sep}{ref}/{quote(path)}"
