@@ -8,10 +8,7 @@ def test_web_base_variants():
     assert gitlink._web_base("ssh://git@gitlab.com/o/r.git") == "https://gitlab.com/o/r"
     assert gitlink._web_base("not a url") is None
     # auth/mirror proxy that prepends its own host
-    assert (
-        gitlink._web_base("https://proxy.internal/proxy/github.com/o/r")
-        == "https://github.com/o/r"
-    )
+    assert gitlink._web_base("https://proxy.internal/proxy/github.com/o/r") == "https://github.com/o/r"
 
 
 def test_file_and_commit_url():
