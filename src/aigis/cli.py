@@ -5,7 +5,7 @@ import json
 import sys
 from pathlib import Path
 
-from aigis import __version__, ai, badge, fix, history, report
+from aigis import __version__, ai, badge, fix, gitlink, history, report
 from aigis.models import Severity
 from aigis.rules import RULES
 from aigis.scanner import ScanResult, scan_path
@@ -136,13 +136,22 @@ def cmd_fix(args: argparse.Namespace) -> int:
 
 
 def cmd_history(args: argparse.Namespace) -> int:
+    root = Path(args.path)
     try:
-        leaks = history.scan_history(Path(args.path), max_commits=args.max_commits)
+        leaks = history.scan_history(root, max_commits=args.max_commits)
     except history.NotARepo as exc:
         print(f"aigis: {exc}", file=sys.stderr)
         return 2
+    base, _ = gitlink.repo_web(str(root.resolve()))
     if args.format == "json":
-        print(json.dumps([lk.as_dict() for lk in leaks], ensure_ascii=False, indent=2))
+        rows = []
+        for lk in leaks:
+            d = lk.as_dict()
+            if base:
+                d["commit_url"] = gitlink.commit_url(base, lk.commit)
+                d["url"] = gitlink.file_url(base, lk.commit, lk.path)
+            rows.append(d)
+        print(json.dumps(rows, ensure_ascii=False, indent=2))
         return 1 if leaks else 0
     if not leaks:
         print("aigis history: секретов в истории git не найдено")
@@ -152,6 +161,8 @@ def cmd_history(args: argparse.Namespace) -> int:
         state = "ещё в коде" if lk.live else "удалён, но остался в истории"
         print(f"  [{lk.severity.name}] {lk.rule_id}  {lk.masked}  ({lk.detail})")
         print(f"      {lk.path}  ·  коммит {lk.commit} от {lk.date}  ·  {state}")
+        if base:
+            print(f"      {gitlink.commit_url(base, lk.commit)}")
     print(
         "\nУдалить коммит мало: любой, кто склонировал репо, видит старые версии файлов.\n"
         "1. Отзови и перевыпусти каждый ключ.\n"

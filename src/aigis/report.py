@@ -6,7 +6,7 @@ import sys
 from collections import defaultdict
 from typing import TextIO
 
-from aigis import __version__
+from aigis import __version__, gitlink
 from aigis.models import Finding, Severity
 from aigis.rules import RULES
 from aigis.scanner import ScanResult
@@ -52,6 +52,7 @@ def _indent(text: str, prefix: str) -> str:
 
 def render_text(result: ScanResult, *, color: bool, verbose: bool = True) -> str:
     st = Style(color)
+    base, sha = gitlink.repo_web(str(result.root))
     out = [
         st(BANNER.rstrip("\n"), "1"),
         st(f"  v{__version__}  //  security scanner for AI-generated code", "2"),
@@ -73,6 +74,8 @@ def render_text(result: ScanResult, *, color: bool, verbose: bool = True) -> str
             title = f.rule.title + (f" ({f.detail})" if f.detail else "")
             out.append(f"  {tag} {st(f.rule.id, '1')}  {title}")
             out.append(st(f"           {path}:{f.line}", "2"))
+            if base:
+                out.append(st(f"           {gitlink.file_url(base, sha, path, f.line)}", "2", "4"))
             if f.snippet:
                 out.append(f"           {st('│', '2')} {f.snippet}")
             if verbose:
@@ -94,8 +97,8 @@ def render_text(result: ScanResult, *, color: bool, verbose: bool = True) -> str
     return "\n".join(out)
 
 
-def _finding_dict(f: Finding) -> dict[str, object]:
-    return {
+def _finding_dict(f: Finding, base: str | None = None, sha: str | None = None) -> dict[str, object]:
+    d: dict[str, object] = {
         "rule": f.rule.id,
         "slug": f.rule.slug,
         "severity": f.effective_severity.label,
@@ -107,9 +110,13 @@ def _finding_dict(f: Finding) -> dict[str, object]:
         "why": f.rule.why,
         "fix": f.ai_fix or f.rule.fix,
     }
+    if base:
+        d["url"] = gitlink.file_url(base, sha, f.path, f.line)
+    return d
 
 
 def render_json(result: ScanResult) -> str:
+    base, sha = gitlink.repo_web(str(result.root))
     return json.dumps(
         {
             "tool": "AigisSAST",
@@ -118,7 +125,7 @@ def render_json(result: ScanResult) -> str:
             "score": result.score,
             "grade": result.grade,
             "summary": {s.label: result.count(s) for s in Severity},
-            "findings": [_finding_dict(f) for f in result.findings],
+            "findings": [_finding_dict(f, base, sha) for f in result.findings],
         },
         ensure_ascii=False,
         indent=2,
@@ -198,6 +205,7 @@ def _rule_markdown_help(rule_id: str) -> str:
 
 
 def render_markdown(result: ScanResult) -> str:
+    base, sha = gitlink.repo_web(str(result.root))
     out = [
         "## AigisSAST report",
         "",
@@ -213,7 +221,7 @@ def render_markdown(result: ScanResult) -> str:
     for f in result.findings:
         out += [
             f"### `{f.effective_severity.name}` {f.rule.id} · {f.rule.title}",
-            f"`{f.path}:{f.line}`",
+            f"[`{f.path}:{f.line}`]({gitlink.file_url(base, sha, f.path, f.line)})" if base else f"`{f.path}:{f.line}`",
             "",
             f"```\n{f.snippet}\n```" if f.snippet else "",
             f"**Чем опасно:** {f.rule.why}",
