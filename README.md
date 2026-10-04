@@ -179,7 +179,7 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@v4
-      - uses: jasperBLCK/AigisSAST@v0.3.0
+      - uses: jasperBLCK/AigisSAST@v0.4.0
         with:
           fail-on: high
 ```
@@ -191,7 +191,7 @@ jobs:
 ```yaml
 repos:
   - repo: https://github.com/jasperBLCK/AigisSAST
-    rev: v0.3.0
+    rev: v0.4.0
     hooks:
       - id: aigis
 ```
