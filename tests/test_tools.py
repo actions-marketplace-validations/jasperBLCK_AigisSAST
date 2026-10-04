@@ -2,6 +2,9 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
+
+from aigis import history
 from aigis.cli import main
 from aigis.fix import apply, plan
 from aigis.history import scan_history
@@ -106,3 +109,8 @@ def test_badge(tmp_path, capsys):
     assert svg.startswith("<svg") and "A 90/100" in svg
     assert main(["badge", str(tmp_path), "--url"]) == 0
     assert capsys.readouterr().out.strip().endswith("A%2090%2F100-2ea44f?labelColor=000000")
+
+
+def test_history_failure_is_reported(tmp_path):
+    with pytest.raises(history.HistoryFailed):
+        list(history._stream(tmp_path, "log", "--definitely-not-an-option"))

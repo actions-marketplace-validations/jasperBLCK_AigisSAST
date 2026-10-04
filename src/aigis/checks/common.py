@@ -9,7 +9,7 @@ SECRET_NAME = re.compile(
     r"|_hash|_hashed|_masked|_minutes|_seconds|_hours|_days|_count|_ref|_key_id|_placeholder|_required"
     r"|_title|_tip|_text|_message|_msg|_description|_error|_route|_tokens|_source|_preference|_mode|_strategy"
     r"|_create|_property|_param|_kind|_format|_provider|_style|_class|_options?|_status|_state|_scopes?|_location"
-    r"|_dir|_column|_selector|_icon|_permission|_action|_event|_template|_input|_attribute|_duration|(token|tokens|password|days|count)_key)$)"
+    r"|_dir|_charset|_alphabet|_chars|_column|_selector|_icon|_permission|_action|_event|_template|_input|_attribute|_duration|(token|tokens|password|days|count)_key)$)"
     r".*(pass(word|wd)?$|passwd|password|pwd$|secret|api_?key|apikey|access_?key|private_?key|auth_?key"
     r"|token$|_token|token_)",
     re.I,
@@ -95,7 +95,8 @@ DEFAULT_PASSWORDS = {
 
 def is_local_default_db(password: str, host: str, user: str = "") -> bool:
     pw, host = password.lower(), host.lower()
-    weak = pw in DEFAULT_PASSWORDS or pw == user.lower() or (len(pw) >= 4 and pw in host)
+    user = user.lower()
+    weak = pw in DEFAULT_PASSWORDS or (len(user) >= 3 and user in pw) or (len(pw) >= 4 and pw in host)
     return "example" in host or (weak and (host in LOCAL_HOSTS or "." not in host))
 
 

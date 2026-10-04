@@ -12,6 +12,7 @@ from aigis.checks.common import (
     is_secret_name,
     is_test_path,
     mask,
+    normalize_name,
     same_as_name,
 )
 from aigis.models import Finding
@@ -46,7 +47,20 @@ ENV_TEMPLATE_VALUE = re.compile(r"change|your|example|placeholder|xxx", re.I)
 COMMENT_LINE = re.compile(r"^\s*(//|/\*|\*|<!--)")
 DOC_DIRS = {"docs", "doc", "document", "documentation", "examples", "example", "samples", "sample", "demo", "demos"}
 STATIC_HTML = re.compile(r"""HTML\s*\+?=\s*(["'`])(?:(?!\1).)*\1\s*;?\s*$""")
-I18N_DIRS = {"locales", "locale", "i18n", "lang", "langs", "translations", "l10n"}
+I18N_DIRS = {"locales", "locale", "i18n", "lang", "langs", "translation", "translations", "l10n"}
+I18N_FILE = re.compile(r"^(translate|translation|messages|strings)[._-].*\.(toml|json|ya?ml|ini|properties)$|\.pot?$")
+API_SPEC = re.compile(
+    r"(^|/)(openapi|swagger)[^/]*\.(json|ya?ml)$|api[-_]?docs?[^/]*\.json$|(^|/)api[-_]?docs?/"
+    r"|(^|/)(examples?|samples?)\.[cm]?[jt]sx?$",
+    re.I,
+)
+VENDOR_FILE = re.compile(
+    r"^(vue|react|react-dom|jquery|bootstrap|angular|lodash|underscore|moment|axios|echarts|chart|d3|three)"
+    r"([.-][\w.-]*)?\.js$",
+    re.I,
+)
+SENTINEL = re.compile(r"^_+\w*_+$")
+TOKEN_NAME = re.compile(r"token$|_token|token_", re.I)
 KEY_BODY = re.compile(r"[A-Za-z0-9+/=]{40,}")
 PUBLIC_ENV = re.compile(
     r"\b(?:NEXT_PUBLIC_|VITE_|REACT_APP_|NUXT_PUBLIC_|EXPO_PUBLIC_)"
@@ -80,7 +94,7 @@ CODE_EXT = {
 FRONT_EXT = {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".vue", ".svelte", ".html", ".astro"}
 CONFIG_EXT = {".yml", ".yaml", ".toml", ".ini", ".cfg", ".conf", ".properties", ".env"}
 DOC_EXT = {".md", ".mdx", ".rst", ".txt", ".adoc"}
-EXAMPLE_SUFFIXES = (".example", ".sample", ".template", ".dist", ".tmpl")
+EXAMPLE_SUFFIXES = (".example", ".sample", ".template", ".dist", ".tmpl", ".tpl", ".j2", ".jinja", ".jinja2")
 
 
 def _finding(rule_id: str, path: str, lineno: int, line: str, secret: str | None = None, detail: str = "") -> Finding:
@@ -124,7 +138,9 @@ def env_has_secret(text: str) -> bool:
 def is_example(path: str) -> bool:
     name = PurePosixPath(path).name.lower()
     return (
-        name.endswith(EXAMPLE_SUFFIXES) or ".example." in name or name.startswith(("example.", "sample.", "template."))
+        name.endswith(EXAMPLE_SUFFIXES)
+        or ".example." in name
+        or name.startswith(("example.", "example-", "example_", "sample.", "sample-", "sample_", "template."))
     )
 
 
@@ -146,7 +162,9 @@ def check_text(path: str, text: str, *, is_python: bool) -> list[Finding]:
     p = PurePosixPath(path)
     name = p.name.lower()
     ext = p.suffix.lower()
-    is_doc = ext in DOC_EXT or any(part.lower() in DOC_DIRS for part in p.parts[:-1])
+    if VENDOR_FILE.match(name):
+        return []
+    is_doc = ext in DOC_EXT or any(part.lower() in DOC_DIRS for part in p.parts[:-1]) or bool(API_SPEC.search(path))
     is_dockerfile = name == "dockerfile" or name.startswith("dockerfile.") or name.endswith(".dockerfile")
     is_compose = name.startswith(("docker-compose", "compose")) and ext in {".yml", ".yaml"}
     is_config = (ext in CONFIG_EXT or is_dockerfile) and not is_example(path)
@@ -155,7 +173,7 @@ def check_text(path: str, text: str, *, is_python: bool) -> list[Finding]:
     in_tests = is_test_path(path)
     in_ci = path.startswith(".github/workflows/") or any(part in {".ci", ".circleci"} for part in p.parts[:-1])
     docs_like = is_doc or is_example(path)
-    is_i18n = any(part.lower() in I18N_DIRS for part in p.parts[:-1])
+    is_i18n = any(part.lower() in I18N_DIRS for part in p.parts[:-1]) or bool(I18N_FILE.search(name))
 
     findings: list[Finding] = []
     lines = text.splitlines()
@@ -174,7 +192,13 @@ def check_text(path: str, text: str, *, is_python: bool) -> list[Finding]:
             ):
                 findings.append(_finding("AIG001", path, i, line, m.group(0), label))
                 break
-        if PRIVATE_KEY.search(line) and not in_tests and not test_value and has_key_body(lines, i):
+        if (
+            PRIVATE_KEY.search(line)
+            and not in_tests
+            and not test_value
+            and not is_example(path)
+            and has_key_body(lines, i)
+        ):
             findings.append(_finding("AIG004", path, i, line))
         if in_tests or is_i18n:
             continue
@@ -240,6 +264,8 @@ def generic_secret(line: str, *, is_config: bool, is_code: bool, is_dockerfile: 
             and not is_placeholder(value)
             and not is_identifier_value(name, value)
             and not same_as_name(name, value)
+            and not SENTINEL.match(value)
+            and not (TOKEN_NAME.search(normalize_name(name)) and len(value) < 10)
         ):
             return name, value
     return None

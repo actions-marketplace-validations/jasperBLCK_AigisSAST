@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import subprocess
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
@@ -21,6 +22,7 @@ from aigis.rules import get
 from aigis.scanner import DEFAULT_EXCLUDES, IGNORE_COMMENT, _load_ignore, _matches
 
 SEP = "\x1e"
+MAX_LINE = 4000
 
 
 @dataclass
@@ -63,6 +65,10 @@ class NotARepo(Exception):
     pass
 
 
+class HistoryFailed(NotARepo):
+    pass
+
+
 def _secrets_in_line(path: str, line: str) -> list[tuple[str, str, str]]:
     out = []
     for label, pattern in TOKEN_PATTERNS:
@@ -97,18 +103,29 @@ def _git(root: Path, *args: str) -> str:
     return proc.stdout.decode("utf-8", "replace")
 
 
+def _stream(root: Path, *args: str) -> Iterator[str]:
+    """Yield `git` output line by line, so huge histories never sit in memory at once."""
+    proc = subprocess.Popen(["git", "-C", str(root), *args], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    assert proc.stdout is not None
+    with proc:
+        for raw in proc.stdout:
+            yield raw[:MAX_LINE].decode("utf-8", "replace").rstrip("\n")
+    if proc.returncode:
+        raise HistoryFailed("err_history_failed")
+
+
 def scan_history(root: Path, *, max_commits: int | None = None) -> list[Leak]:
     root = root.resolve()
     _git(root, "rev-parse", "--git-dir")
-    args = ["log", "--all", "-p", "-U0", "--no-color", "--no-renames", "--date=short", f"--format={SEP}%h %ad"]
+    args = ["log", "--all", "-p", "-U0", "--no-color", "--no-renames", "--no-textconv", "--date=short"]
+    args.append(f"--format={SEP}%h %ad")
     if max_commits:
         args.append(f"-n{max_commits}")
-    log = _git(root, *args)
 
     patterns = DEFAULT_EXCLUDES + _load_ignore(root)
     leaks: dict[tuple[str, str], Leak] = {}
     commit = date = path = ""
-    for line in log.split("\n"):
+    for line in _stream(root, *args):
         if line.startswith(SEP):
             commit, _, date = line[1:].partition(" ")
         elif line.startswith("+++ "):
@@ -120,19 +137,17 @@ def scan_history(root: Path, *, max_commits: int | None = None) -> list[Leak]:
                 key = (rule_id, secret)
                 leaks[key] = Leak(rule_id, path, commit, date, secret, detail)
 
-    head = _tracked_text(root)
+    tracked = set(_git(root, "ls-files", "-z").split("\0"))
+    texts: dict[str, str] = {}
     for leak in leaks.values():
-        leak.live = leak.secret in head.get(leak.path, "")
+        if leak.path in tracked and leak.path not in texts:
+            texts[leak.path] = _read_small(root / leak.path)
+        leak.live = leak.secret in texts.get(leak.path, "")
     return sorted(leaks.values(), key=lambda x: (-int(x.severity), x.live, x.path))
 
 
-def _tracked_text(root: Path) -> dict[str, str]:
-    out = {}
-    for rel in _git(root, "ls-files", "-z").split("\0"):
-        p = root / rel
-        if rel and p.is_file() and p.stat().st_size < 1_000_000:
-            try:
-                out[rel] = p.read_text("utf-8", "replace")
-            except OSError:
-                continue
-    return out
+def _read_small(p: Path) -> str:
+    try:
+        return p.read_text("utf-8", "replace") if p.is_file() and p.stat().st_size < 1_000_000 else ""
+    except OSError:
+        return ""

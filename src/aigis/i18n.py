@@ -223,6 +223,10 @@ MESSAGES.update(
         "fix_first": {"en": "fix first:", "ru": "начни с:"},
         "err_no_git": {"en": "git is not installed", "ru": "git не установлен"},
         "err_not_repo": {"en": "not a git repository", "ru": "не git-репозиторий"},
+        "err_history_failed": {
+            "en": "git log failed or was killed (out of memory?); history was NOT fully checked, try -n 5000",
+            "ru": "git log упал или был убит (не хватило памяти?); история проверена НЕ полностью, попробуй -n 5000",
+        },
         "rules_header": {
             "en": "{n} rules · details: aigis explain <ID>",
             "ru": "{n} правил · подробно: aigis explain <ID>",
